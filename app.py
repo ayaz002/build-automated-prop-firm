@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, request, session
+from flask import Flask, jsonify, request, session, send_from_directory
 from flask_cors import CORS
 from apscheduler.schedulers.background import BackgroundScheduler
 import json, os, hashlib, secrets
@@ -147,10 +147,16 @@ def manual_scrape():
     run_daily_scrape()
     return jsonify({"ok": True, "message": "Scrape complete"})
 
+# ── serve frontend ────────────────────────────────────────────────────────────
+@app.route("/")
+def index():
+    return send_from_directory(".", "index.html")
+
 # ── boot ──────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     seed_admin()
     scheduler = BackgroundScheduler()
     scheduler.add_job(run_daily_scrape, "cron", hour=6, minute=0)
     scheduler.start()
-    app.run(host="0.0.0.0", port=5000, debug=False)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=False)
