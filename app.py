@@ -12,7 +12,6 @@ CORS(app, supports_credentials=True, origins="*")
 DATA_FILE  = "data.json"
 USERS_FILE = "users.json"
 
-# ── storage helpers ───────────────────────────────────────────────────────────
 def load_json(path, default):
     if not os.path.exists(path):
         return default
@@ -26,7 +25,6 @@ def save_json(path, obj):
 def hash_pw(pw):
     return hashlib.sha256(pw.encode()).hexdigest()
 
-# ── seed admin user if not exists ─────────────────────────────────────────────
 def seed_admin():
     users = load_json(USERS_FILE, {})
     if "admin" not in users:
@@ -34,14 +32,13 @@ def seed_admin():
             "password": hash_pw("admin123"),
             "role": "admin",
             "firms": {
-                "lucid":    {"username": "", "password": ""},
-                "tpt":      {"username": "", "password": ""},
+                "lucid": {"username": "", "password": ""},
+                "tpt":   {"username": "", "password": ""},
             }
         }
         save_json(USERS_FILE, users)
         print("✅ Admin seeded — login: admin / admin123")
 
-# ── scrape all users ──────────────────────────────────────────────────────────
 def run_daily_scrape():
     users = load_json(USERS_FILE, {})
     all_data = load_json(DATA_FILE, {})
@@ -49,21 +46,17 @@ def run_daily_scrape():
         firms = info.get("firms", {})
         results = {}
         if firms.get("lucid", {}).get("username"):
-            results["lucid"] = scrape_lucid(
-                firms["lucid"]["username"], firms["lucid"]["password"]
-            )
+            results["lucid"] = scrape_lucid(firms["lucid"]["username"], firms["lucid"]["password"])
         if firms.get("tpt", {}).get("username"):
-            results["tpt"] = scrape_tpt(
-                firms["tpt"]["username"], firms["tpt"]["password"]
-            )
-        all_data[username] = {
-            "last_updated": datetime.utcnow().isoformat(),
-            "firms": results,
-        }
+            results["tpt"] = scrape_tpt(firms["tpt"]["username"], firms["tpt"]["password"])
+        all_data[username] = {"last_updated": datetime.utcnow().isoformat(), "firms": results}
     save_json(DATA_FILE, all_data)
     print(f"✅ Daily scrape complete at {datetime.utcnow().isoformat()}")
 
-# ── auth routes ───────────────────────────────────────────────────────────────
+@app.route("/")
+def index():
+    return send_from_directory(".", "index.html")
+
 @app.route("/api/login", methods=["POST"])
 def login():
     body  = request.json or {}
@@ -86,7 +79,6 @@ def me():
         return jsonify({"ok": False}), 401
     return jsonify({"ok": True, "username": session["user"], "role": session["role"]})
 
-# ── user data route ───────────────────────────────────────────────────────────
 @app.route("/api/data")
 def get_data():
     if "user" not in session:
@@ -98,17 +90,14 @@ def get_data():
         return jsonify(all_data)
     return jsonify({username: all_data.get(username, {})})
 
-# ── admin: list users ─────────────────────────────────────────────────────────
 @app.route("/api/admin/users")
 def list_users():
     if session.get("role") != "admin":
         return jsonify({"error": "Forbidden"}), 403
     users = load_json(USERS_FILE, {})
-    safe  = {u: {"role": v["role"], "firms": list(v.get("firms", {}).keys())}
-             for u, v in users.items()}
+    safe  = {u: {"role": v["role"], "firms": list(v.get("firms", {}).keys())} for u, v in users.items()}
     return jsonify(safe)
 
-# ── admin: create user ────────────────────────────────────────────────────────
 @app.route("/api/admin/users", methods=["POST"])
 def create_user():
     if session.get("role") != "admin":
@@ -129,7 +118,6 @@ def create_user():
     save_json(USERS_FILE, users)
     return jsonify({"ok": True})
 
-# ── admin: delete user ────────────────────────────────────────────────────────
 @app.route("/api/admin/users/<username>", methods=["DELETE"])
 def delete_user(username):
     if session.get("role") != "admin":
@@ -139,7 +127,6 @@ def delete_user(username):
     save_json(USERS_FILE, users)
     return jsonify({"ok": True})
 
-# ── admin: trigger manual scrape ──────────────────────────────────────────────
 @app.route("/api/admin/scrape", methods=["POST"])
 def manual_scrape():
     if session.get("role") != "admin":
@@ -147,16 +134,12 @@ def manual_scrape():
     run_daily_scrape()
     return jsonify({"ok": True, "message": "Scrape complete"})
 
-# ── serve frontend ────────────────────────────────────────────────────────────
-@app.route("/")
-def index():
-    return send_from_directory(".", "index.html")
+# Run seed and scheduler at module level so Railway picks it up
+seed_admin()
+scheduler = BackgroundScheduler()
+scheduler.add_job(run_daily_scrape, "cron", hour=6, minute=0)
+scheduler.start()
 
-# ── boot ──────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    seed_admin()
-    scheduler = BackgroundScheduler()
-    scheduler.add_job(run_daily_scrape, "cron", hour=6, minute=0)
-    scheduler.start()
-    port = int(os.environ.get("PORT", 5000))
+    port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port, debug=False)
