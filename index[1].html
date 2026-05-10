@@ -1,0 +1,864 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>PropTrack — Prop Firm Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:       #0a0b0d;
+    --surface:  #111318;
+    --border:   #1e2028;
+    --accent:   #00e5a0;
+    --accent2:  #ff6b35;
+    --text:     #e8eaf0;
+    --muted:    #5a5f72;
+    --danger:   #ff4d6d;
+    --card-bg:  #13151c;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Syne', sans-serif;
+    min-height: 100vh;
+  }
+
+  /* ── LOGIN ── */
+  #login-screen {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: radial-gradient(ellipse at 30% 50%, #001a2e 0%, var(--bg) 60%);
+  }
+
+  .login-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 48px 40px;
+    width: 100%;
+    max-width: 400px;
+    box-shadow: 0 32px 80px rgba(0,0,0,0.5);
+  }
+
+  .login-logo {
+    font-size: 22px;
+    font-weight: 800;
+    color: var(--accent);
+    letter-spacing: -0.5px;
+    margin-bottom: 8px;
+  }
+
+  .login-sub {
+    color: var(--muted);
+    font-size: 13px;
+    margin-bottom: 36px;
+  }
+
+  .field-label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 8px;
+    display: block;
+  }
+
+  .field-wrap { margin-bottom: 20px; }
+
+  input[type="text"], input[type="password"] {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-family: 'DM Mono', monospace;
+    font-size: 14px;
+    padding: 12px 16px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  input:focus { border-color: var(--accent); }
+
+  .btn {
+    width: 100%;
+    background: var(--accent);
+    color: #000;
+    border: none;
+    border-radius: 8px;
+    font-family: 'Syne', sans-serif;
+    font-size: 14px;
+    font-weight: 700;
+    padding: 14px;
+    cursor: pointer;
+    letter-spacing: 0.5px;
+    transition: opacity 0.2s;
+    margin-top: 8px;
+  }
+  .btn:hover { opacity: 0.85; }
+  .btn.danger { background: var(--danger); color: #fff; }
+  .btn.outline {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-weight: 600;
+  }
+  .btn.sm { padding: 8px 16px; font-size: 12px; width: auto; margin-top: 0; }
+
+  .error-msg {
+    color: var(--danger);
+    font-size: 13px;
+    margin-top: 12px;
+    text-align: center;
+  }
+
+  /* ── APP SHELL ── */
+  #app { display: none; flex-direction: column; min-height: 100vh; }
+
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 32px;
+    height: 60px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  .topbar-logo {
+    font-size: 18px;
+    font-weight: 800;
+    color: var(--accent);
+    letter-spacing: -0.5px;
+  }
+
+  .topbar-right {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .user-pill {
+    background: var(--border);
+    border-radius: 20px;
+    padding: 6px 14px;
+    font-size: 12px;
+    color: var(--muted);
+    font-family: 'DM Mono', monospace;
+  }
+
+  .logout-btn {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    border-radius: 6px;
+    padding: 6px 14px;
+    font-size: 12px;
+    cursor: pointer;
+    font-family: 'Syne', sans-serif;
+    transition: color 0.2s, border-color 0.2s;
+  }
+  .logout-btn:hover { color: var(--danger); border-color: var(--danger); }
+
+  /* ── TABS ── */
+  .tabs {
+    display: flex;
+    gap: 4px;
+    padding: 0 32px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+
+  .tab {
+    padding: 14px 20px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--muted);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: color 0.2s, border-color 0.2s;
+  }
+  .tab.active { color: var(--accent); border-color: var(--accent); }
+  .tab:hover:not(.active) { color: var(--text); }
+
+  /* ── MAIN CONTENT ── */
+  .main { flex: 1; padding: 32px; max-width: 1200px; margin: 0 auto; width: 100%; }
+
+  .page { display: none; }
+  .page.active { display: block; }
+
+  /* ── STAT CARDS ── */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin-bottom: 32px;
+  }
+
+  .stat-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    position: relative;
+    overflow: hidden;
+    animation: fadeUp 0.4s ease both;
+  }
+
+  .stat-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: var(--accent);
+    opacity: 0.6;
+  }
+
+  .stat-card.spending::before { background: var(--accent2); }
+  .stat-card.net::before { background: #7c6af7; }
+
+  .stat-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 12px;
+  }
+
+  .stat-value {
+    font-family: 'DM Mono', monospace;
+    font-size: 28px;
+    font-weight: 500;
+    color: var(--text);
+  }
+
+  .stat-value.green { color: var(--accent); }
+  .stat-value.orange { color: var(--accent2); }
+  .stat-value.purple { color: #7c6af7; }
+
+  .stat-sub {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 6px;
+  }
+
+  /* ── FIRM CARDS ── */
+  .firms-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+    gap: 20px;
+    margin-bottom: 32px;
+  }
+
+  .firm-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    animation: fadeUp 0.5s ease both;
+  }
+
+  .firm-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .firm-name {
+    font-size: 15px;
+    font-weight: 700;
+  }
+
+  .firm-badge {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    background: rgba(0, 229, 160, 0.1);
+    color: var(--accent);
+    border: 1px solid rgba(0, 229, 160, 0.2);
+  }
+
+  .firm-badge.error {
+    background: rgba(255, 77, 109, 0.1);
+    color: var(--danger);
+    border-color: rgba(255, 77, 109, 0.2);
+  }
+
+  .firm-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px;
+    background: var(--border);
+  }
+
+  .firm-stat {
+    background: var(--card-bg);
+    padding: 16px 24px;
+  }
+
+  .firm-stat-label {
+    font-size: 10px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+
+  .firm-stat-value {
+    font-family: 'DM Mono', monospace;
+    font-size: 20px;
+    color: var(--accent);
+  }
+
+  .firm-stat-value.spending { color: var(--accent2); }
+
+  /* ── TABLE ── */
+  .section-title {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 16px;
+    padding-top: 8px;
+  }
+
+  .data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    margin-bottom: 32px;
+  }
+
+  .data-table th {
+    text-align: left;
+    padding: 10px 16px;
+    font-size: 10px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .data-table td {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    font-family: 'DM Mono', monospace;
+    font-size: 13px;
+  }
+
+  .data-table tr:last-child td { border-bottom: none; }
+  .data-table tr:hover td { background: rgba(255,255,255,0.02); }
+
+  .badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+  }
+
+  .badge.completed {
+    background: rgba(0,229,160,0.1);
+    color: var(--accent);
+  }
+
+  .badge.processing {
+    background: rgba(255,107,53,0.1);
+    color: var(--accent2);
+  }
+
+  .badge.pending {
+    background: rgba(90,95,114,0.2);
+    color: var(--muted);
+  }
+
+  /* ── ADMIN PANEL ── */
+  .admin-section {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 28px;
+    margin-bottom: 24px;
+  }
+
+  .admin-section h3 {
+    font-size: 14px;
+    font-weight: 700;
+    margin-bottom: 20px;
+    color: var(--text);
+  }
+
+  .form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .form-group { display: flex; flex-direction: column; gap: 6px; }
+
+  .form-group label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .form-group input {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-family: 'DM Mono', monospace;
+    font-size: 13px;
+    padding: 10px 12px;
+    outline: none;
+  }
+
+  .form-group input:focus { border-color: var(--accent); }
+
+  .users-list { display: flex; flex-direction: column; gap: 10px; }
+
+  .user-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+
+  .user-row-name {
+    font-family: 'DM Mono', monospace;
+    font-size: 14px;
+    color: var(--text);
+  }
+
+  .user-row-meta {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+
+  .scrape-btn {
+    background: rgba(0,229,160,0.1);
+    border: 1px solid rgba(0,229,160,0.3);
+    color: var(--accent);
+    border-radius: 8px;
+    padding: 10px 20px;
+    font-family: 'Syne', sans-serif;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+
+  .scrape-btn:hover { background: rgba(0,229,160,0.2); }
+
+  .last-update {
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 8px;
+  }
+
+  /* ── EMPTY STATE ── */
+  .empty {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--muted);
+    font-size: 14px;
+  }
+
+  /* ── ANIMATIONS ── */
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(16px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ── RESPONSIVE ── */
+  @media (max-width: 640px) {
+    .main { padding: 16px; }
+    .stats-grid { grid-template-columns: 1fr 1fr; }
+    .firms-grid { grid-template-columns: 1fr; }
+    .form-grid  { grid-template-columns: 1fr; }
+    .topbar     { padding: 0 16px; }
+    .tabs       { padding: 0 16px; overflow-x: auto; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ── LOGIN ── -->
+<div id="login-screen">
+  <div class="login-box">
+    <div class="login-logo">PropTrack</div>
+    <div class="login-sub">Prop firm payout & spending tracker</div>
+    <div class="field-wrap">
+      <label class="field-label">Username</label>
+      <input type="text" id="login-user" placeholder="Enter username" />
+    </div>
+    <div class="field-wrap">
+      <label class="field-label">Password</label>
+      <input type="password" id="login-pass" placeholder="••••••••"
+             onkeydown="if(event.key==='Enter') doLogin()" />
+    </div>
+    <button class="btn" onclick="doLogin()">Sign In</button>
+    <div class="error-msg" id="login-error"></div>
+  </div>
+</div>
+
+<!-- ── APP ── -->
+<div id="app">
+  <div class="topbar">
+    <div class="topbar-logo">PropTrack</div>
+    <div class="topbar-right">
+      <div class="user-pill" id="user-label">—</div>
+      <button class="logout-btn" onclick="doLogout()">Sign out</button>
+    </div>
+  </div>
+
+  <div class="tabs" id="tabs">
+    <div class="tab active" onclick="showTab('dashboard')">Dashboard</div>
+    <div class="tab" onclick="showTab('payouts')">Payouts</div>
+    <div class="tab" onclick="showTab('spending')">Spending</div>
+    <div class="tab admin-tab" onclick="showTab('admin')" style="display:none">Admin</div>
+  </div>
+
+  <div class="main">
+    <!-- DASHBOARD -->
+    <div class="page active" id="page-dashboard">
+      <div class="stats-grid" id="stats-grid"></div>
+      <div class="firms-grid" id="firms-grid"></div>
+    </div>
+
+    <!-- PAYOUTS -->
+    <div class="page" id="page-payouts">
+      <div class="section-title">All Payouts</div>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Firm</th><th>Order #</th><th>Date</th><th>Amount</th><th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="payouts-body"></tbody>
+      </table>
+    </div>
+
+    <!-- SPENDING -->
+    <div class="page" id="page-spending">
+      <div class="section-title">All Spending</div>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Firm</th><th>Order #</th><th>Date</th><th>Amount</th><th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="spending-body"></tbody>
+      </table>
+    </div>
+
+    <!-- ADMIN -->
+    <div class="page" id="page-admin">
+      <div class="admin-section">
+        <h3>Add New User</h3>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Username</label>
+            <input type="text" id="new-username" placeholder="trader1" />
+          </div>
+          <div class="form-group">
+            <label>Password</label>
+            <input type="password" id="new-password" placeholder="••••••" />
+          </div>
+          <div class="form-group">
+            <label>Lucid Trading Username</label>
+            <input type="text" id="lucid-user" placeholder="email@example.com" />
+          </div>
+          <div class="form-group">
+            <label>Lucid Trading Password</label>
+            <input type="password" id="lucid-pass" placeholder="••••••" />
+          </div>
+          <div class="form-group">
+            <label>Take Profit Trader Username</label>
+            <input type="text" id="tpt-user" placeholder="email@example.com" />
+          </div>
+          <div class="form-group">
+            <label>Take Profit Trader Password</label>
+            <input type="password" id="tpt-pass" placeholder="••••••" />
+          </div>
+        </div>
+        <button class="btn sm" onclick="createUser()">Add User</button>
+        <div class="error-msg" id="user-error"></div>
+      </div>
+
+      <div class="admin-section">
+        <h3>Manage Users</h3>
+        <div class="users-list" id="users-list"></div>
+      </div>
+
+      <div class="admin-section">
+        <h3>Data Sync</h3>
+        <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">
+          Data syncs automatically every day at 6:00 AM UTC. You can also trigger a manual sync below.
+        </p>
+        <button class="scrape-btn" onclick="triggerScrape()">Run Manual Sync Now</button>
+        <div class="last-update" id="last-update"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = "http://localhost:5000/api";
+let currentRole = "";
+let dashData    = {};
+
+// ── AUTH ──────────────────────────────────────────────────────────────────────
+async function doLogin() {
+  const u = document.getElementById("login-user").value.trim();
+  const p = document.getElementById("login-pass").value;
+  const r = await fetch(`${API}/login`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username: u, password: p }),
+  }).then(r => r.json()).catch(() => ({ ok: false }));
+  if (r.ok) {
+    currentRole = r.role;
+    document.getElementById("user-label").textContent = u;
+    document.getElementById("login-error").textContent = "";
+    document.getElementById("login-screen").style.display = "none";
+    document.getElementById("app").style.display = "flex";
+    if (r.role === "admin") {
+      document.querySelector(".admin-tab").style.display = "block";
+    }
+    loadData();
+  } else {
+    document.getElementById("login-error").textContent = "Invalid username or password.";
+  }
+}
+
+async function doLogout() {
+  await fetch(`${API}/logout`, { method: "POST", credentials: "include" });
+  location.reload();
+}
+
+// ── TABS ──────────────────────────────────────────────────────────────────────
+function showTab(name) {
+  document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
+  document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+  document.getElementById(`page-${name}`).classList.add("active");
+  event.currentTarget.classList.add("active");
+  if (name === "admin") loadUsers();
+}
+
+// ── LOAD DATA ─────────────────────────────────────────────────────────────────
+async function loadData() {
+  const raw = await fetch(`${API}/data`, { credentials: "include" })
+    .then(r => r.json()).catch(() => ({}));
+  dashData = raw;
+  renderDashboard(raw);
+  renderPayouts(raw);
+  renderSpending(raw);
+}
+
+function getFirms(raw) {
+  const results = [];
+  for (const [user, userData] of Object.entries(raw)) {
+    const firms = userData.firms || {};
+    for (const [firmKey, firmData] of Object.entries(firms)) {
+      results.push({ user, firmKey, ...firmData });
+    }
+  }
+  return results;
+}
+
+// ── DASHBOARD ─────────────────────────────────────────────────────────────────
+function renderDashboard(raw) {
+  const firms = getFirms(raw);
+  let totalPayout = 0, totalSpend = 0;
+
+  firms.forEach(f => {
+    totalPayout += f.total_payout  || 0;
+    totalSpend  += f.total_spending || 0;
+  });
+
+  const net = totalPayout - totalSpend;
+
+  document.getElementById("stats-grid").innerHTML = `
+    <div class="stat-card">
+      <div class="stat-label">Total Payouts</div>
+      <div class="stat-value green">$${fmt(totalPayout)}</div>
+      <div class="stat-sub">Across all firms</div>
+    </div>
+    <div class="stat-card spending">
+      <div class="stat-label">Total Spending</div>
+      <div class="stat-value orange">$${fmt(totalSpend)}</div>
+      <div class="stat-sub">Fees & subscriptions</div>
+    </div>
+    <div class="stat-card net">
+      <div class="stat-label">Net Profit</div>
+      <div class="stat-value purple">$${fmt(net)}</div>
+      <div class="stat-sub">Payouts minus spending</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Active Firms</div>
+      <div class="stat-value">${firms.length}</div>
+      <div class="stat-sub">Connected accounts</div>
+    </div>
+  `;
+
+  if (!firms.length) {
+    document.getElementById("firms-grid").innerHTML =
+      `<div class="empty">No data yet — run a sync from the Admin panel.</div>`;
+    return;
+  }
+
+  document.getElementById("firms-grid").innerHTML = firms.map(f => `
+    <div class="firm-card">
+      <div class="firm-header">
+        <div class="firm-name">${f.firm || f.firmKey}</div>
+        <div class="firm-badge ${f.error ? 'error' : ''}">${f.error ? 'Error' : 'Active'}</div>
+      </div>
+      <div class="firm-stats">
+        <div class="firm-stat">
+          <div class="firm-stat-label">Total Payouts</div>
+          <div class="firm-stat-value">$${fmt(f.total_payout)}</div>
+        </div>
+        <div class="firm-stat">
+          <div class="firm-stat-label">Total Spending</div>
+          <div class="firm-stat-value spending">$${fmt(f.total_spending)}</div>
+        </div>
+      </div>
+    </div>
+  `).join("");
+}
+
+// ── PAYOUTS TABLE ─────────────────────────────────────────────────────────────
+function renderPayouts(raw) {
+  const firms = getFirms(raw);
+  let rows = "";
+  firms.forEach(f => {
+    (f.payouts || []).forEach(p => {
+      rows += `<tr>
+        <td>${f.firm || f.firmKey}</td>
+        <td>${p.id}</td>
+        <td>${p.date}</td>
+        <td style="color:var(--accent)">$${fmt(p.amount)}</td>
+        <td><span class="badge completed">${p.status}</span></td>
+      </tr>`;
+    });
+  });
+  document.getElementById("payouts-body").innerHTML =
+    rows || `<tr><td colspan="5" class="empty">No payout data yet.</td></tr>`;
+}
+
+// ── SPENDING TABLE ────────────────────────────────────────────────────────────
+function renderSpending(raw) {
+  const firms = getFirms(raw);
+  let rows = "";
+  firms.forEach(f => {
+    (f.spending || []).forEach(s => {
+      rows += `<tr>
+        <td>${f.firm || f.firmKey}</td>
+        <td>${s.id}</td>
+        <td>${s.date}</td>
+        <td style="color:var(--accent2)">$${fmt(s.amount)}</td>
+        <td><span class="badge processing">${s.status}</span></td>
+      </tr>`;
+    });
+  });
+  document.getElementById("spending-body").innerHTML =
+    rows || `<tr><td colspan="5" class="empty">No spending data yet.</td></tr>`;
+}
+
+// ── ADMIN ─────────────────────────────────────────────────────────────────────
+async function loadUsers() {
+  const users = await fetch(`${API}/admin/users`, { credentials: "include" })
+    .then(r => r.json()).catch(() => ({}));
+  const list = document.getElementById("users-list");
+  const entries = Object.entries(users);
+  if (!entries.length) { list.innerHTML = `<div class="empty">No users yet.</div>`; return; }
+  list.innerHTML = entries.map(([u, info]) => `
+    <div class="user-row">
+      <div>
+        <div class="user-row-name">${u}</div>
+        <div class="user-row-meta">${info.role} · ${(info.firms||[]).join(", ") || "no firms"}</div>
+      </div>
+      ${u !== "admin" ? `<button class="btn sm danger" onclick="deleteUser('${u}')">Remove</button>` : ""}
+    </div>
+  `).join("");
+}
+
+async function createUser() {
+  const body = {
+    username:  document.getElementById("new-username").value.trim(),
+    password:  document.getElementById("new-password").value,
+    lucid_user: document.getElementById("lucid-user").value.trim(),
+    lucid_pass: document.getElementById("lucid-pass").value,
+    tpt_user:   document.getElementById("tpt-user").value.trim(),
+    tpt_pass:   document.getElementById("tpt-pass").value,
+  };
+  if (!body.username) {
+    document.getElementById("user-error").textContent = "Username required."; return;
+  }
+  const r = await fetch(`${API}/admin/users`, {
+    method: "POST", credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  }).then(r => r.json());
+  if (r.ok) {
+    document.getElementById("user-error").textContent = "";
+    ["new-username","new-password","lucid-user","lucid-pass","tpt-user","tpt-pass"]
+      .forEach(id => document.getElementById(id).value = "");
+    loadUsers();
+  } else {
+    document.getElementById("user-error").textContent = r.error || "Error creating user.";
+  }
+}
+
+async function deleteUser(u) {
+  if (!confirm(`Remove user "${u}"?`)) return;
+  await fetch(`${API}/admin/users/${u}`, { method: "DELETE", credentials: "include" });
+  loadUsers();
+}
+
+async function triggerScrape() {
+  const btn = document.querySelector(".scrape-btn");
+  btn.textContent = "Syncing…";
+  btn.disabled = true;
+  await fetch(`${API}/admin/scrape`, { method: "POST", credentials: "include" });
+  btn.textContent = "Run Manual Sync Now";
+  btn.disabled = false;
+  document.getElementById("last-update").textContent =
+    "Last sync: " + new Date().toLocaleString();
+  loadData();
+}
+
+// ── UTILS ─────────────────────────────────────────────────────────────────────
+function fmt(n) {
+  return (n || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+</script>
+</body>
+</html>
