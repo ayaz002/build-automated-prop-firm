@@ -547,7 +547,20 @@
   <div class="main">
     <!-- DASHBOARD -->
     <div class="page active" id="page-dashboard">
-      <div class="stats-grid" id="stats-grid"></div>
+      
+      <!-- Gmail Connect Banner -->
+      <div id="gmail-banner" style="display:none;background:rgba(0,229,160,0.08);border:1px solid rgba(0,229,160,0.2);border-radius:12px;padding:20px 24px;margin-bottom:24px;display:flex;align-items:center;justify-content:space-between;">
+        <div>
+          <div style="font-size:14px;font-weight:700;color:var(--accent);margin-bottom:4px;">Connect Gmail to sync your data</div>
+          <div style="font-size:12px;color:var(--muted);">Automatically pull payouts and spending from your Lucid Trading & Take Profit Trader emails</div>
+        </div>
+        <button class="btn sm" onclick="connectGmail()" style="white-space:nowrap">Connect Gmail</button>
+      </div>
+
+      <div style="display:flex;justify-content:flex-end;margin-bottom:20px;">
+        <button id="sync-btn" class="scrape-btn" onclick="syncGmail()" style="display:none">Sync Gmail Now</button>
+      </div>
+<div class="stats-grid" id="stats-grid"></div>
       <div class="firms-grid" id="firms-grid"></div>
     </div>
 
@@ -630,6 +643,7 @@
 
 <script>
 const API = "/api";
+let authToken = localStorage.getItem("proptrack_token") || "";
 let currentRole = "";
 let dashData    = {};
 
@@ -639,11 +653,12 @@ async function doLogin() {
   const p = document.getElementById("login-pass").value;
   const r = await fetch(`${API}/login`, {
     method: "POST",
-    credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username: u, password: p }),
   }).then(r => r.json()).catch(() => ({ ok: false }));
   if (r.ok) {
+    authToken = r.token;
+    localStorage.setItem("proptrack_token", authToken);
     currentRole = r.role;
     document.getElementById("user-label").textContent = u;
     document.getElementById("login-error").textContent = "";
@@ -659,7 +674,7 @@ async function doLogin() {
 }
 
 async function doLogout() {
-  await fetch(`${API}/logout`, { method: "POST", credentials: "include" });
+  await fetch(`${API}/logout`, { method: "POST", headers: { "X-Token": authToken } });
   location.reload();
 }
 
@@ -674,12 +689,23 @@ function showTab(name) {
 
 // ── LOAD DATA ─────────────────────────────────────────────────────────────────
 async function loadData() {
-  const raw = await fetch(`${API}/data`, { credentials: "include" })
+  const raw = await fetch(`${API}/data`, { headers: { "X-Token": authToken } })
     .then(r => r.json()).catch(() => ({}));
   dashData = raw;
   renderDashboard(raw);
   renderPayouts(raw);
   renderSpending(raw);
+  // Check Gmail status
+  const me = await fetch(`${API}/me`, { headers: { "X-Token": authToken } }).then(r => r.json());
+  const banner = document.getElementById("gmail-banner");
+  const syncBtn = document.getElementById("sync-btn");
+  if (me.has_gmail) {
+    if (banner) banner.style.display = "none";
+    if (syncBtn) syncBtn.style.display = "block";
+  } else {
+    if (banner) banner.style.display = "flex";
+    if (syncBtn) syncBtn.style.display = "none";
+  }
 }
 
 function getFirms(raw) {
@@ -794,7 +820,7 @@ function renderSpending(raw) {
 
 // ── ADMIN ─────────────────────────────────────────────────────────────────────
 async function loadUsers() {
-  const users = await fetch(`${API}/admin/users`, { credentials: "include" })
+  const users = await fetch(`${API}/admin/users`, { headers: { "X-Token": authToken } })
     .then(r => r.json()).catch(() => ({}));
   const list = document.getElementById("users-list");
   const entries = Object.entries(users);
@@ -823,8 +849,7 @@ async function createUser() {
     document.getElementById("user-error").textContent = "Username required."; return;
   }
   const r = await fetch(`${API}/admin/users`, {
-    method: "POST", credentials: "include",
-    headers: { "Content-Type": "application/json" },
+    method: "POST", headers: { "Content-Type": "application/json", "X-Token": authToken },
     body: JSON.stringify(body),
   }).then(r => r.json());
   if (r.ok) {
@@ -839,7 +864,7 @@ async function createUser() {
 
 async function deleteUser(u) {
   if (!confirm(`Remove user "${u}"?`)) return;
-  await fetch(`${API}/admin/users/${u}`, { method: "DELETE", credentials: "include" });
+  await fetch(`${API}/admin/users/${u}`, { method: "DELETE", headers: { "X-Token": authToken } });
   loadUsers();
 }
 
@@ -847,7 +872,7 @@ async function triggerScrape() {
   const btn = document.querySelector(".scrape-btn");
   btn.textContent = "Syncing…";
   btn.disabled = true;
-  await fetch(`${API}/admin/scrape`, { method: "POST", credentials: "include" });
+  await fetch(`${API}/admin/scrape`, { method: "POST", headers: { "X-Token": authToken } });
   btn.textContent = "Run Manual Sync Now";
   btn.disabled = false;
   document.getElementById("last-update").textContent =
@@ -858,6 +883,27 @@ async function triggerScrape() {
 // ── UTILS ─────────────────────────────────────────────────────────────────────
 function fmt(n) {
   return (n || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+async function connectGmail() {
+  const r = await fetch(`${API}/gmail/connect`, { headers: { "X-Token": authToken } }).then(r => r.json());
+  if (r.url) window.location.href = r.url;
+}
+
+async function syncGmail() {
+  const btn = document.getElementById("sync-btn");
+  btn.textContent = "Syncing...";
+  btn.disabled = true;
+  await fetch(`${API}/gmail/sync`, { method: "POST", headers: { "X-Token": authToken } });
+  btn.textContent = "Sync Gmail Now";
+  btn.disabled = false;
+  loadData();
+}
+
+// Check if returned from OAuth
+if (window.location.search.includes("gmail=connected")) {
+  history.replaceState({}, "", "/");
+  loadData();
 }
 </script>
 </body>
