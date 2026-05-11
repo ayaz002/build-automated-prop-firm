@@ -1,34 +1,33 @@
-from flask import Flask, jsonify, request, session, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory, redirect
 from flask_cors import CORS
 from apscheduler.schedulers.background import BackgroundScheduler
 import json, os, hashlib, secrets
 from datetime import datetime
-from scraper import scrape_lucid, scrape_tpt
+from gmail_parser import get_auth_url, exchange_code, fetch_gmail_data
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", secrets.token_hex(32))
-CORS(app, supports_credentials=True, origins="*")
+CORS(app, origins="*")
 
-DATA_FILE  = "data.json"
-
-# ── In-memory user store (persists as long as server runs) ───────────────────
-USERS = {}
+DATA_FILE = "data.json"
+USERS  = {}
+TOKENS = {}  # token -> username
 
 def hash_pw(pw):
     return hashlib.sha256(pw.encode()).hexdigest()
 
 def seed_admin():
-    global USERS
     admin_pw = os.environ.get("ADMIN_PASSWORD", "admin123")
     USERS["admin"] = {
         "password": hash_pw(admin_pw),
         "role": "admin",
-        "firms": {
-            "lucid": {"username": "", "password": ""},
-            "tpt":   {"username": "", "password": ""},
-        }
+        "gmail_creds": None,
+        "firms": {}
     }
-    print(f"✅ Admin seeded")
+    print("✅ Admin seeded")
+
+def get_current_user():
+    token = request.headers.get("X-Token", "")
+    return TOKENS.get(token)
 
 def load_data():
     if not os.path.exists(DATA_FILE):
@@ -43,90 +42,179 @@ def save_data(obj):
 def run_daily_scrape():
     all_data = load_data()
     for username, info in USERS.items():
-        firms = info.get("firms", {})
-        results = {}
-        if firms.get("lucid", {}).get("username"):
-            results["lucid"] = scrape_lucid(firms["lucid"]["username"], firms["lucid"]["password"])
-        if firms.get("tpt", {}).get("username"):
-            results["tpt"] = scrape_tpt(firms["tpt"]["username"], firms["tpt"]["password"])
-        all_data[username] = {"last_updated": datetime.utcnow().isoformat(), "firms": results}
+        creds = info.get("gmail_creds")
+        if not creds:
+            continue
+        try:
+            result = fetch_gmail_data(creds)
+            all_data[username] = {
+                "last_updated": datetime.utcnow().isoformat(),
+                "firms": {
+                    "lucid": {
+                        "firm": "Lucid Trading",
+                        "payouts":        [p for p in result["payouts"]  if p["firm"] == "Lucid Trading"],
+                        "spending":       [s for s in result["spending"] if s["firm"] == "Lucid Trading"],
+                        "total_payout":   round(sum(p["amount"] for p in result["payouts"]  if p["firm"] == "Lucid Trading"), 2),
+                        "total_spending": round(sum(s["amount"] for s in result["spending"] if s["firm"] == "Lucid Trading"), 2),
+                    },
+                    "tpt": {
+                        "firm": "Take Profit Trader",
+                        "payouts":        [p for p in result["payouts"]  if p["firm"] == "Take Profit Trader"],
+                        "spending":       [s for s in result["spending"] if s["firm"] == "Take Profit Trader"],
+                        "total_payout":   round(sum(p["amount"] for p in result["payouts"]  if p["firm"] == "Take Profit Trader"), 2),
+                        "total_spending": round(sum(s["amount"] for s in result["spending"] if s["firm"] == "Take Profit Trader"), 2),
+                    },
+                }
+            }
+        except Exception as e:
+            print(f"Scrape error for {username}: {e}")
     save_data(all_data)
-    print(f"✅ Daily scrape complete at {datetime.utcnow().isoformat()}")
+    print(f"✅ Daily sync complete at {datetime.utcnow().isoformat()}")
 
+# ── FRONTEND ──────────────────────────────────────────────────────────────────
 @app.route("/")
 def index():
     return send_from_directory(".", "index.html")
 
+# ── AUTH ──────────────────────────────────────────────────────────────────────
 @app.route("/api/login", methods=["POST"])
 def login():
-    body = request.json or {}
-    user = USERS.get(body.get("username", ""))
+    body  = request.json or {}
+    uname = body.get("username", "")
+    user  = USERS.get(uname)
     if user and user["password"] == hash_pw(body.get("password", "")):
-        session["user"] = body["username"]
-        session["role"] = user["role"]
-        return jsonify({"ok": True, "role": user["role"]})
+        token = secrets.token_hex(32)
+        TOKENS[token] = uname
+        has_gmail = bool(user.get("gmail_creds"))
+        return jsonify({"ok": True, "role": user["role"], "token": token, "has_gmail": has_gmail})
     return jsonify({"ok": False, "error": "Invalid credentials"}), 401
 
 @app.route("/api/logout", methods=["POST"])
 def logout():
-    session.clear()
+    token = request.headers.get("X-Token", "")
+    TOKENS.pop(token, None)
     return jsonify({"ok": True})
 
 @app.route("/api/me")
 def me():
-    if "user" not in session:
+    uname = get_current_user()
+    if not uname:
         return jsonify({"ok": False}), 401
-    return jsonify({"ok": True, "username": session["user"], "role": session["role"]})
+    return jsonify({"ok": True, "username": uname, "role": USERS[uname]["role"],
+                    "has_gmail": bool(USERS[uname].get("gmail_creds"))})
 
+# ── DATA ──────────────────────────────────────────────────────────────────────
 @app.route("/api/data")
 def get_data():
-    if "user" not in session:
+    uname = get_current_user()
+    if not uname:
         return jsonify({"error": "Unauthorized"}), 401
     all_data = load_data()
-    username = session["user"]
-    role     = session["role"]
+    role = USERS[uname]["role"]
     if role == "admin":
         return jsonify(all_data)
-    return jsonify({username: all_data.get(username, {})})
+    return jsonify({uname: all_data.get(uname, {})})
 
+# ── GMAIL OAUTH ───────────────────────────────────────────────────────────────
+@app.route("/api/gmail/connect")
+def gmail_connect():
+    uname = get_current_user()
+    if not uname:
+        return jsonify({"error": "Unauthorized"}), 401
+    state = f"{uname}:{secrets.token_hex(8)}"
+    url = get_auth_url(state)
+    return jsonify({"url": url})
+
+@app.route("/oauth/callback")
+def oauth_callback():
+    code  = request.args.get("code")
+    state = request.args.get("state", "")
+    uname = state.split(":")[0] if ":" in state else ""
+    if not code or uname not in USERS:
+        return "Error: Invalid OAuth callback", 400
+    try:
+        creds = exchange_code(code)
+        USERS[uname]["gmail_creds"] = creds
+        return redirect("/?gmail=connected")
+    except Exception as e:
+        return f"Error: {e}", 500
+
+@app.route("/api/gmail/sync", methods=["POST"])
+def gmail_sync():
+    uname = get_current_user()
+    if not uname:
+        return jsonify({"error": "Unauthorized"}), 401
+    creds = USERS[uname].get("gmail_creds")
+    if not creds:
+        return jsonify({"error": "Gmail not connected"}), 400
+    try:
+        result = fetch_gmail_data(creds)
+        all_data = load_data()
+        all_data[uname] = {
+            "last_updated": datetime.utcnow().isoformat(),
+            "firms": {
+                "lucid": {
+                    "firm": "Lucid Trading",
+                    "payouts":        [p for p in result["payouts"]  if p["firm"] == "Lucid Trading"],
+                    "spending":       [s for s in result["spending"] if s["firm"] == "Lucid Trading"],
+                    "total_payout":   round(sum(p["amount"] for p in result["payouts"]  if p["firm"] == "Lucid Trading"), 2),
+                    "total_spending": round(sum(s["amount"] for s in result["spending"] if s["firm"] == "Lucid Trading"), 2),
+                },
+                "tpt": {
+                    "firm": "Take Profit Trader",
+                    "payouts":        [p for p in result["payouts"]  if p["firm"] == "Take Profit Trader"],
+                    "spending":       [s for s in result["spending"] if s["firm"] == "Take Profit Trader"],
+                    "total_payout":   round(sum(p["amount"] for p in result["payouts"]  if p["firm"] == "Take Profit Trader"), 2),
+                    "total_spending": round(sum(s["amount"] for s in result["spending"] if s["firm"] == "Take Profit Trader"), 2),
+                },
+            }
+        }
+        save_data(all_data)
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ── ADMIN ─────────────────────────────────────────────────────────────────────
 @app.route("/api/admin/users")
 def list_users():
-    if session.get("role") != "admin":
+    uname = get_current_user()
+    if not uname or USERS[uname]["role"] != "admin":
         return jsonify({"error": "Forbidden"}), 403
-    safe = {u: {"role": v["role"], "firms": list(v.get("firms", {}).keys())} for u, v in USERS.items()}
+    safe = {u: {"role": v["role"], "has_gmail": bool(v.get("gmail_creds"))} for u, v in USERS.items()}
     return jsonify(safe)
 
 @app.route("/api/admin/users", methods=["POST"])
 def create_user():
-    if session.get("role") != "admin":
+    uname = get_current_user()
+    if not uname or USERS[uname]["role"] != "admin":
         return jsonify({"error": "Forbidden"}), 403
     body  = request.json or {}
-    uname = body.get("username", "").strip()
-    if not uname or uname in USERS:
+    new_u = body.get("username", "").strip()
+    if not new_u or new_u in USERS:
         return jsonify({"error": "Username missing or already exists"}), 400
-    USERS[uname] = {
-        "password": hash_pw(body.get("password", "changeme")),
-        "role": "user",
-        "firms": {
-            "lucid": {"username": body.get("lucid_user", ""), "password": body.get("lucid_pass", "")},
-            "tpt":   {"username": body.get("tpt_user",   ""), "password": body.get("tpt_pass",   "")},
-        }
+    USERS[new_u] = {
+        "password":    hash_pw(body.get("password", "changeme")),
+        "role":        "user",
+        "gmail_creds": None,
+        "firms":       {}
     }
     return jsonify({"ok": True})
 
 @app.route("/api/admin/users/<username>", methods=["DELETE"])
 def delete_user(username):
-    if session.get("role") != "admin":
+    uname = get_current_user()
+    if not uname or USERS[uname]["role"] != "admin":
         return jsonify({"error": "Forbidden"}), 403
     USERS.pop(username, None)
     return jsonify({"ok": True})
 
 @app.route("/api/admin/scrape", methods=["POST"])
 def manual_scrape():
-    if session.get("role") != "admin":
+    uname = get_current_user()
+    if not uname or USERS[uname]["role"] != "admin":
         return jsonify({"error": "Forbidden"}), 403
     run_daily_scrape()
-    return jsonify({"ok": True, "message": "Scrape complete"})
+    return jsonify({"ok": True})
 
 seed_admin()
 scheduler = BackgroundScheduler()
