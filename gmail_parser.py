@@ -25,14 +25,13 @@ REDIRECT_URI = "https://build-automated-prop-firm-production.up.railway.app/oaut
 FIRMS = {
     "Lucid Trading": {
         "sender_keywords": ["lucidtrading", "lucid-trading", "lucid trading"],
-        "payout_subjects": ["payout", "withdrawal", "payment sent", "profit"],
+        "payout_subjects": ["payout", "withdrawal", "payment sent", "profit", "your payment has been sent"],
         "spending_subjects": ["subscription", "fee", "purchase", "invoice", "reset", "order"],
-        # Extract "Profit Share: $X" or "Amount: $X"
         "amount_patterns": [
+            r"payment amount[:\s]+\$?([\d,]+\.?\d*)",
             r"profit share[:\s]+\$?([\d,]+\.?\d*)",
             r"amount requested[:\s]+\$?([\d,]+\.?\d*)",
             r"amount[:\s]+\$?([\d,]+\.?\d*)",
-            r"\$\s*([\d,]+\.?\d*)",
         ]
     },
     "Take Profit Trader": {
