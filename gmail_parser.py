@@ -1,6 +1,6 @@
 """
 Gmail OAuth + email parser for payout and spending data.
-Searches for emails from Lucid Trading and Take Profit Trader.
+Tuned for Lucid Trading, Take Profit Trader, and My Funded Futures email formats.
 """
 
 import os, base64, re
@@ -21,14 +21,41 @@ CLIENT_CONFIG = {
 
 REDIRECT_URI = "https://build-automated-prop-firm-production.up.railway.app/oauth/callback"
 
-# Keywords to identify payout vs spending emails
-PAYOUT_KEYWORDS  = ["payout", "withdrawal", "payment sent", "funds sent", "profit share"]
-SPENDING_KEYWORDS = ["subscription", "fee", "purchase", "charge", "invoice", "reset", "order confirmation"]
-
-FIRM_SENDERS = [
-    "lucidtrading", "lucid trading", "lucid-trading",
-    "takeprofittrader", "take profit trader", "tpt"
-]
+# ── Firm definitions ──────────────────────────────────────────────────────────
+FIRMS = {
+    "Lucid Trading": {
+        "sender_keywords": ["lucidtrading", "lucid-trading", "lucid trading"],
+        "payout_subjects": ["payout", "withdrawal", "payment sent", "profit"],
+        "spending_subjects": ["subscription", "fee", "purchase", "invoice", "reset", "order"],
+        # Extract "Profit Share: $X" or "Amount: $X"
+        "amount_patterns": [
+            r"profit share[:\s]+\$?([\d,]+\.?\d*)",
+            r"amount requested[:\s]+\$?([\d,]+\.?\d*)",
+            r"amount[:\s]+\$?([\d,]+\.?\d*)",
+            r"\$\s*([\d,]+\.?\d*)",
+        ]
+    },
+    "Take Profit Trader": {
+        "sender_keywords": ["takeprofittrader", "take profit trader", "tpt"],
+        "payout_subjects": ["payout", "withdrawal", "payment sent", "profit"],
+        "spending_subjects": ["subscription", "fee", "purchase", "invoice", "reset", "order"],
+        "amount_patterns": [
+            r"profit share[:\s]+\$?([\d,]+\.?\d*)",
+            r"amount requested[:\s]+\$?([\d,]+\.?\d*)",
+            r"amount[:\s]+\$?([\d,]+\.?\d*)",
+            r"\$\s*([\d,]+\.?\d*)",
+        ]
+    },
+    "My Funded Futures": {
+        "sender_keywords": ["myfundedfutures", "my funded futures", "mff"],
+        "payout_subjects": ["payout request has been received", "payout", "withdrawal", "profit"],
+        "spending_subjects": ["subscription", "fee", "purchase", "invoice", "reset", "order"],
+        "amount_patterns": [
+            r"profit share[:\s]+\$?([\d,]+\.?\d*)",  # Use profit share as the real payout
+            r"amount requested[:\s]+\$?([\d,]+\.?\d*)",
+        ]
+    },
+}
 
 
 def get_auth_url(state: str) -> str:
@@ -53,28 +80,23 @@ def exchange_code(code: str) -> dict:
     }
 
 
-def parse_amount(text: str) -> float:
-    match = re.search(r"\$\s*([\d,]+\.?\d*)", text)
-    if match:
-        return float(match.group(1).replace(",", ""))
+def parse_amount(text: str, patterns: list) -> float:
+    """Try each pattern in order, return first match."""
+    lower = text.lower()
+    for pattern in patterns:
+        match = re.search(pattern, lower)
+        if match:
+            try:
+                return float(match.group(1).replace(",", ""))
+            except:
+                continue
     return 0.0
-
-
-def classify_email(subject: str, body: str) -> str:
-    combined = (subject + " " + body).lower()
-    for kw in PAYOUT_KEYWORDS:
-        if kw in combined:
-            return "payout"
-    for kw in SPENDING_KEYWORDS:
-        if kw in combined:
-            return "spending"
-    return "unknown"
 
 
 def get_email_body(msg: dict) -> str:
     payload = msg.get("payload", {})
-    parts = payload.get("parts", [])
-    body = ""
+    parts   = payload.get("parts", [])
+    body    = ""
     if parts:
         for part in parts:
             if part.get("mimeType") == "text/plain":
@@ -88,42 +110,62 @@ def get_email_body(msg: dict) -> str:
     return body
 
 
+def match_firm(sender: str) -> tuple:
+    """Return (firm_name, firm_config) or (None, None)."""
+    sender_lower = sender.lower()
+    for firm_name, config in FIRMS.items():
+        if any(kw in sender_lower for kw in config["sender_keywords"]):
+            return firm_name, config
+    return None, None
+
+
+def classify_email(subject: str, firm_config: dict) -> str:
+    subject_lower = subject.lower()
+    for kw in firm_config["payout_subjects"]:
+        if kw in subject_lower:
+            return "payout"
+    for kw in firm_config["spending_subjects"]:
+        if kw in subject_lower:
+            return "spending"
+    return "unknown"
+
+
 def fetch_gmail_data(creds_dict: dict) -> dict:
-    creds = Credentials(**{k: v for k, v in creds_dict.items() if k != "scopes"})
+    creds   = Credentials(**{k: v for k, v in creds_dict.items() if k != "scopes"})
     service = build("gmail", "v1", credentials=creds)
 
     payouts  = []
     spending = []
 
-    # Search for emails from prop firms
-    query = "from:(lucidtrading OR takeprofittrader OR lucid OR tpt)"
-    results = service.users().messages().list(userId="me", q=query, maxResults=100).execute()
+    # Search all known firm emails
+    query = "from:(lucidtrading OR takeprofittrader OR myfundedfutures OR \"lucid trading\" OR \"take profit trader\" OR \"my funded futures\")"
+    results  = service.users().messages().list(userId="me", q=query, maxResults=200).execute()
     messages = results.get("messages", [])
 
     for m in messages:
-        msg = service.users().messages().get(userId="me", id=m["id"], format="full").execute()
+        msg     = service.users().messages().get(userId="me", id=m["id"], format="full").execute()
         headers = {h["name"]: h["value"] for h in msg.get("payload", {}).get("headers", [])}
         subject = headers.get("Subject", "")
         date    = headers.get("Date", "")
-        sender  = headers.get("From", "").lower()
+        sender  = headers.get("From", "")
 
-        # Only process emails from known firms
-        if not any(firm in sender for firm in FIRM_SENDERS):
+        firm_name, firm_config = match_firm(sender)
+        if not firm_name:
             continue
 
         body   = get_email_body(msg)
-        amount = parse_amount(subject + " " + body)
-        kind   = classify_email(subject, body)
+        kind   = classify_email(subject, firm_config)
+        amount = parse_amount(subject + " " + body, firm_config["amount_patterns"])
 
-        # Determine firm name
-        firm = "Lucid Trading" if any(x in sender for x in ["lucid"]) else "Take Profit Trader"
+        if kind == "unknown" or amount == 0:
+            continue
 
         entry = {
             "id":      m["id"],
             "date":    date,
             "subject": subject,
             "amount":  amount,
-            "firm":    firm,
+            "firm":    firm_name,
             "status":  kind,
         }
 
